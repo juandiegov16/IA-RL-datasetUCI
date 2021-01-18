@@ -1,0 +1,375 @@
+---
+title: "RL RNA dataset UCI"
+output: html_notebook
+pdf_document: default
+---
+Importamos librerías requeridas
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(broom)
+library(ggthemes)
+library(caret)
+library(bindrcpp)
+library(RColorBrewer)
+library(caTools)
+library(ggplot2)
+library(GGally)
+library(rpart.plot)
+library(rattle)
+library(dplyr)
+library(nnet)
+library(reticulate)
+use_condaenv("py3.8", required = TRUE)
+py_config()
+library(CatEncoders)
+library(varhandle)
+library(tidyverse)
+library(regclass)
+```
+Ahora importamos el dataset e imprimimos una vista previa.
+```{r}
+datasetUCI <- read.csv("./heart.csv")
+head(datasetUCI)
+```
+Verificamos si hay datos nulos...
+```{r}
+sum(is.na(datasetUCI))
+str(datasetUCI)
+```
+
+Necesitamos etiquetar nuestras variables para poder trabajar mejor con ellas
+```{r}
+#Etiquetando los features
+
+#Target
+datasetUCI$target<-as.factor(datasetUCI$target)
+levels(datasetUCI$target)[levels(datasetUCI$target)==0] <- "No Enfermo"
+levels(datasetUCI$target)[levels(datasetUCI$target)==1] <- "Enfermo"
+#Dolor en Pecho
+
+datasetUCI$cp<-as.factor(datasetUCI$cp)
+levels(datasetUCI$cp)[levels(datasetUCI$cp)==0] <- "Dolor En Pecho Tipo 0"
+levels(datasetUCI$cp)[levels(datasetUCI$cp)==1] <- "Dolor En Pecho Tipo 1"
+levels(datasetUCI$cp)[levels(datasetUCI$cp)==2] <- "Dolor En Pecho Tipo 2"
+levels(datasetUCI$cp)[levels(datasetUCI$cp)==3] <- "Dolor En Pecho Tipo 3"
+
+#Sexo
+datasetUCI$sex<-as.factor(datasetUCI$sex)
+levels(datasetUCI$sex)[levels(datasetUCI$sex)==0] <- "Femenino"
+levels(datasetUCI$sex)[levels(datasetUCI$sex)==1] <- "Masculino"
+
+#Talasemia
+datasetUCI$thal<-as.factor(datasetUCI$thal)
+levels(datasetUCI$thal)[levels(datasetUCI$thal)==0] <- "Sin Talasemia"
+levels(datasetUCI$thal)[levels(datasetUCI$thal)==1] <- "Talasemia Normal"
+levels(datasetUCI$thal)[levels(datasetUCI$thal)==2] <- "Talasemia - Defecto Reparado"
+levels(datasetUCI$thal)[levels(datasetUCI$thal)==3] <- "Talasemia - Defecto Reversible"
+
+#Azúcar en la sangre, en ayunas
+datasetUCI$fbs<-as.factor(datasetUCI$fbs)
+levels(datasetUCI$fbs)[levels(datasetUCI$fbs)==0] <- "Azúcar en Sangre, en Ayunas <= 120"
+levels(datasetUCI$fbs)[levels(datasetUCI$fbs)==1] <- "Azúcar en Sangre, en Ayunas > 120"
+
+#Angina Inducida por Ejercicio
+datasetUCI$exang<-as.factor(datasetUCI$exang)
+levels(datasetUCI$exang)[levels(datasetUCI$exang)==0] <- "Sin Angina Inducida por Ejercicio"
+levels(datasetUCI$exang)[levels(datasetUCI$exang)==1] <- "Angina Inducida por Ejercicio"
+
+#ECG
+datasetUCI$restecg<-as.factor(datasetUCI$restecg)
+levels(datasetUCI$restecg)[levels(datasetUCI$restecg)==0] <- "ECG en Reposo 0"
+levels(datasetUCI$restecg)[levels(datasetUCI$restecg)==1] <- "ECG en Reposo 1"
+levels(datasetUCI$restecg)[levels(datasetUCI$restecg)==2] <- "ECG en Reposo 2"
+
+#ST Slope
+datasetUCI$slope<-as.factor(datasetUCI$slope)
+levels(datasetUCI$slope)[levels(datasetUCI$slope)==0] <- "Pendiente Tope Segmento ST durante Ejercicio 0"
+levels(datasetUCI$slope)[levels(datasetUCI$slope)==1] <- "Pendiente Tope Segmento ST durante Ejercicio 1"
+levels(datasetUCI$slope)[levels(datasetUCI$slope)==2] <- "Pendiente Tope Segmento ST durante Ejercicio 2"
+```
+
+```{r}
+str(datasetUCI)
+summary(datasetUCI)
+```
+Total observaciones gente enferma vs gente no enferma
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") + theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-total-obs.png")
+```
+Enfermedad cardíaca más prominente entre mujeres que entre hombres.
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~sex, ncol=2,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-target-vs-sex.png")
+```
+No se evidencia diferencia significativa entre las distribuciones de ECG en reposo de personas enfermas y personas no enfermas
+```{r}
+ggplot(datasetUCI,aes(trestbps, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(90, 200, by=10), color="grey17") +
+geom_density(alpha=.1, fill="black") +
+facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B")) +
+xlab("Presión Sanguínea en Reposo (en momento de ingreso a hospital) (mmHg)") +
+ylab("Densidad / Conteo") +
+ggtitle("Histograma - ECG en reposo")
+ggsave("UCI-hist-restECG.png")
+
+```
+```{r}
+ggplot(datasetUCI,aes(age, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(0, 80, by=1), color="grey17") +
+geom_density(alpha=.1, fill="black")+ facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() + scale_fill_manual(values=c("#97BE11","#DC1E0B"))+ xlab("Edad") +
+ylab("Densidad / Conteo") +
+ggtitle("Histograma - Edad")
+ggsave("UCI-hist-edad.png")
+```
+```{r}
+ggplot(datasetUCI,aes(x=target, y=age, fill=target)) +
+geom_boxplot() +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-boxplot-edad.png")
+```
+```{r}
+ggplot(datasetUCI,aes(thalach, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(70, 205, by=10), color="grey17") +
+geom_density(alpha=.1, fill="black") +
+facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B")) +
+xlab("Máximo Ritmo Cardíaco") +
+ylab("Densidad / Conteo") +
+ggtitle("Histograma - Máximo Ritmo Cardíaco")
+ggsave("UCI-hist-max-heart.png")
+```
+Se puede evidenciar que la gente con enfermedades cardíacas generalmente tienen ritmos cardíacos más altos.
+```{r}
+ggplot(datasetUCI,aes(chol, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(100, 600, by=25), color="grey17") +
+geom_density(alpha=.1, fill="black") +
+facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B")) +
+xlab("Colesterol Total en mg/dL") +
+ylab("Densidad / Conteo") +
+ggtitle("Histograma - Colesterol Total")
+ggsave("UCI-hist-colest.png")
+```
+```{r}
+ggplot(datasetUCI,aes(oldpeak, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(0, 7, by=0.1), color="grey17") +
+geom_density(alpha=.1, fill="black") +
+facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B")) +
+ggtitle("Histograma - Depresión en Segmento ST") +
+xlab("Depresión en Segmento ST Inducida por Ejercicio") +
+ylab("Densidad / Counteo")
+ggsave("UCI-hist-dep-ST.png")
+```
+La mayoría de pacientes enfermos tienen depresión en segmento ST de 0.1.
+```{r}
+ggplot(datasetUCI,aes(ca, fill=target)) +
+geom_histogram(aes(y=..density..),breaks=seq(0, 5, by=1), color="grey17") +
+geom_density(alpha=.1, fill="black") +
+facet_wrap(~target, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B")) +
+ggtitle("Histograma - N° vasos sanguíneos coloreados") +
+xlab("N° de vasos sanguíneos importantes coloreados (0-3) durante fluoroscopía") +
+ylab("Densidad / Conteo")
+ggsave("UCI-num-vasos-col.png")
+```
+La mayoría de personas sin vasos sanguíneos coloreados durante una fluoroscopía sufren de enfermedad cardíaca.
+
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~cp, ncol=2,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-dolor-pecho.png")
+```
+Mayoría de personas enfermas sufren de dolor en pecho tipo 1 o tipo 2.
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~fbs, ncol=2,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-azucar-sangre.png")
+```
+No hay diferencia significativa en azúcar en la sangre estando en ayunas
+.
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~restecg, ncol=3,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-ECG-reposo.png")
+```
+Personas con resultado 1 en el ECG en reposo tienen probabilidad más alta de enfermedad cardíaca.
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~exang, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-exang.png")
+```
+Personas sin angina inducida por ejercicio tienen probabilidad más alta de enfermedad cardíaca.
+
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~slope, ncol=1,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-ST-slope.png")
+```
+Personas con Pendiente 2 tienen probabilidad más alta de enfermedad cardíaca.
+```{r}
+ggplot(datasetUCI,aes(target, fill=target)) +
+geom_bar(stat="count") +
+facet_wrap(~thal, ncol=2,scale="fixed") +
+theme_clean() +
+scale_fill_manual(values=c("#97BE11","#DC1E0B"))
+ggsave("UCI-thal.png")
+```
+Personas con Talasemia (defecto reparado) tienen probabilidad más alta de enfermedad cardíaca.
+```{r}
+log<-glm(target~., data=datasetUCI, family=binomial)
+summary(log)
+```
+Se conservan sólo las variables significativas, gracias al análisis anterior del modelo lineal generalizado.
+```{r}
+d<-datasetUCI[,c(2,3,9,10,12,14)]
+summary(d)
+```
+Modelo lineal generalizado con las variables que conversamos.
+```{r}
+log<-glm(target~., data=d, family=binomial)
+summary(log)
+```
+```{r}
+log.df<-tidy(log)
+```
+Observaciones muestran que con dolor en pecho tipo 2 o 3, hay mayor probabilidad de enfermedad cardíaca.
+La probabilidad disminuye si el paciente es hombre, presenta angina inducida por el ejercicio y/o presenta más vasos sanguíneos coloreados durante fluoroscopía.
+
+```{r}
+log.df %>%
+mutate(term=reorder(term,estimate)) %>%
+ggplot( aes(term,estimate, fill=estimate)) +
+geom_bar(stat="identity") +
+scale_fill_gradient(low = "#97BE11",high = "#DC1E0B") +
+theme_clean() +
+geom_hline(yintercept=0) +
+coord_flip()
+ggsave("UCI-ord-var-imp-est.png")
+```
+Se estima que el dolor en pecho tipo 2 es la variable más importante, seguida por el tipo 3 y el tipo 1.
+```{r}
+data<-d
+set.seed(1237)
+train <- sample(nrow(data), .8*nrow(data), replace = FALSE)
+TrainingSet <- data[train,]
+ValidSet <- data[-train,]
+
+fitControl <- trainControl(method = "repeatedcv",
+                            number = 10,
+                            repeats = 10,
+                            classProbs = TRUE,
+                            summaryFunction = twoClassSummary)
+
+TrainingSet$target<-make.names(TrainingSet$target)
+set.seed(142)
+TrainingSet$target<-as.factor(TrainingSet$target)
+gbm.ada.1 <- caret::train(target ~ .,
+                            data = TrainingSet ,
+                            method = "glm",
+                            trControl = fitControl,
+                            metric="ROC")
+
+gbm.ada.1
+```
+```{r}
+varImp(gbm.ada.1)
+```
+```{r}
+pred <- predict(gbm.ada.1,ValidSet)
+levels(pred)[2] <- "No Enfermo"
+
+t<-table(pred, ValidSet$target)
+t.df<-as.data.frame(t)
+
+res<-caret::confusionMatrix(pred, ValidSet$target, positive = "Enfermo")
+res
+```
+```{r}
+ggplot(data = t.df, aes(x = Var2, y = pred, label=Freq)) +
+geom_tile(aes(fill = Freq)) +
+scale_fill_gradient(low="#97BE11",high="#DC1E0B") +
+theme_clean() +
+xlab("Enfermedad Cardíaca - Real") +
+ylab("Enfermedad Cardíaca - Predicción") +
+geom_text(size=8) +
+ggtitle("Dataset UCI - Regresión Logística")
+ggsave("UCI-RL-cf-matrix.png")
+```
+Lista la regresión logística. Falta la red neuronal.
+```{r}
+fitControl <- trainControl(method = "repeatedcv",
+                            number = 10,
+                            repeats = 10,
+                            classProbs = TRUE,
+                            summaryFunction = twoClassSummary)
+
+gbm.ada.1 <- caret::train(target ~ .,
+                          data = TrainingSet ,
+                          method = "nnet",
+                          trControl = fitControl,
+                          metric="ROC")
+```
+```{r}
+gbm.ada.1
+```
+```{r}
+varImp(gbm.ada.1)
+```
+```{r}
+pred <- predict(gbm.ada.1,ValidSet)
+levels(pred)[2] <- "No Enfermo"
+t<-table(pred, ValidSet$target)
+t.df<-as.data.frame(t)
+res<-caret::confusionMatrix(pred, ValidSet$target, positive = "Enfermo")
+res
+```
+```{r}
+ggplot(data = t.df, aes(x = Var2, y = pred, label=Freq)) +
+geom_tile(aes(fill = Freq)) +
+scale_fill_gradient(low="#97BE11",high="#DC1E0B") +
+theme_clean() +
+xlab("Enfermedad Cardíaca - Real") +
+ylab("Enfermedad Cardíaca - Predicción") +
+geom_text(size=8) +
+ggtitle("Dataset UCI - Red Neuronal Artificial")
+ggsave("UCI-RNA-cf-matrix.png")
+```
+
+
+
+
+
+
